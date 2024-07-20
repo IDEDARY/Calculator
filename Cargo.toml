@@ -1,0 +1,54 @@
+[package]
+  name = "calculator"
+  authors     = ["IDEDARY"]
+  version     = "0.0.1"
+  edition     = "2021"
+  resolver    = "2"
+
+[profile.dev]
+  debug = 0
+  strip = "debuginfo"
+  opt-level = 0
+
+[profile.dev.package."*"]
+  opt-level = 3
+
+[profile.release]
+  opt-level = 3
+  panic = 'abort'
+  debug = 0
+  strip = true
+  lto = "thin"
+  codegen-units = 1
+
+[dependencies]
+
+  calc = "0.4.0"
+  rand = "0.8.5"
+  bevy_lunex = { version = "0.2.1", features=["kira"] }
+  bevy_kira_audio = { version = "^0.20.0" }
+  bevy_embedded_assets = { version = "^0.11.0" }
+
+  # Game engine
+  bevy = { version = "^0.14.0", default-features = false, features = [
+    # Core
+    "bevy_core_pipeline",
+    "multi_threaded",
+    "bevy_winit",
+    "bevy_sprite",
+    "bevy_gilrs",
+    "bevy_text",
+    "webgl2",
+
+    # Core formats
+    "png",
+
+    # VFX
+    "hdr",
+    "tonemapping_luts",
+    
+  ] }
+
+# Platform specific
+[target.'cfg(unix)'.dependencies]
+  bevy = { version = "^0.14.0", default-features = false, features = ["x11", "wayland"] }
