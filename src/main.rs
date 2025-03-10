@@ -1,203 +1,164 @@
 use std::ops::Add;
 
 pub(crate) use calc::*;
-pub(crate) use bevy::core_pipeline::bloom::BloomSettings;
-pub(crate) use bevy::{prelude::*, sprite::Anchor};
-pub(crate) use bevy_lunex::prelude::*;
+pub(crate) use bevy::core_pipeline::bloom::Bloom;
+pub(crate) use bevy::prelude::*;
+pub(crate) use bevy_lunex::*;
 pub(crate) use bevy_embedded_assets::*;
-pub(crate) use bevy_kira_audio::prelude::*;
 
 mod button;
 use button::*;
 
-fn main() {
+fn main() -> AppExit {
     App::new()
         .add_plugins(EmbeddedAssetPlugin { mode: PluginMode::ReplaceDefault})
-        .add_plugins(DefaultPlugins.set (
-            WindowPlugin {
-                primary_window: Some(Window {
-                    title: "Calculator".into(),
-                    present_mode: bevy::window::PresentMode::AutoNoVsync,
-                    resolution: bevy::window::WindowResolution::new(360.0, 520.0),
-                    resizable: false,
+        .add_plugins((
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Calculator".into(),
+                        resolution: bevy::window::WindowResolution::new(360.0, 520.0),
+                        resizable: false,
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(AssetPlugin {
+                    meta_check: bevy::asset::AssetMetaCheck::Never,
                     ..default()
                 }),
-                ..default()
-            }
-            ).set(AssetPlugin {
-                meta_check: bevy::asset::AssetMetaCheck::Never,
-                ..default()
-            })
-        )
-        .add_plugins((AudioPlugin, UiPlugin))
+            UiLunexPlugins,
+        ))
 
-        .add_systems(Startup, setup)
-        .add_systems(Update, add_controller)
-        .add_systems(Update, update.run_if(on_event::<UiClickEvent>()))
+        .add_systems(Startup, spawn_camera)
+        .add_systems(Startup, spawn_ui)
         .add_plugins(ButtonPlugin)
 
         .add_systems(Update, vfx_bloom_flicker)
-        .run();
+        .run()
 }
 
 
 // #=====================#
 // #=== GENERIC SETUP ===#
 
-fn setup(mut commands: Commands, assets: Res<AssetServer>, mut atlas_layout: ResMut<Assets<TextureAtlasLayout>>){
-    // Spawn 2D camera
+
+/// This system spawns & setups the basic camera with cursor
+fn spawn_camera(mut commands: Commands, asset_server: Res<AssetServer>, mut atlas_layout: ResMut<Assets<TextureAtlasLayout>>) {
+    // Spawn the camera
     commands.spawn((
-        MainUi,
-        BloomSettings::OLD_SCHOOL,
-        InheritedVisibility::default(),
-        Camera2dBundle {
-            transform: Transform::from_xyz(0.0, 0.0, 1000.0),
-            camera: Camera {
-                hdr: true,
-                ..default()
-            },
-            ..default()
-        },
-    )).with_children(|camera| {
+        Camera2d, Camera { hdr: true, clear_color: ClearColorConfig::Custom(Color::srgba(0.0, 0.0, 0.0, 0.0)), ..default() }, Bloom::OLD_SCHOOL, UiSourceCamera::<0>, Transform::from_translation(Vec3::Z * 1000.0),
+    )).with_children(|cam| {
 
         // Spawn cursor
-        camera.spawn ((
+        cam.spawn ((
+            SoftwareCursor::new()
+                .set_index(bevy::window::SystemCursorIcon::Default, 0, (14.0, 14.0))
+                .set_index(bevy::window::SystemCursorIcon::Pointer, 1, (10.0, 12.0))
+                .set_index(bevy::window::SystemCursorIcon::Grab, 2, (40.0, 40.0)),
 
-            // Here we can map different native cursor icons to texture atlas indexes and sprite offsets
-            Cursor2d::new()
-                .set_index(CursorIcon::Default, 0, (14.0, 14.0))
-                .set_index(CursorIcon::Pointer, 1, (10.0, 12.0))
-                .set_index(CursorIcon::Grab, 2, (40.0, 40.0)),
-
-            // Here we specify that the cursor should be controlled by gamepad 0
-            //GamepadCursor::new(0),
-
-            // This is required for picking to work
-            PointerBundle::new(PointerId::Custom(pointer::Uuid::new_v4())),
+            // Change the scale
+            Transform::from_scale(Vec3::new(0.45, 0.45, 1.0)),
             
-            // Add texture atlas to the cursor
-            TextureAtlas {
-                layout: atlas_layout.add(TextureAtlasLayout::from_grid(UVec2::splat(80), 3, 1, None, None)),
-                index: 0,
-            },
-            SpriteBundle {
-                texture: assets.load(AssetPath::CURSOR),
-                transform: Transform { scale: Vec3::new(0.45, 0.45, 1.0), ..default() },
-                sprite: Sprite {
-                    color: Color::BEVYPUNK_YELLOW.with_alpha(2.0),
-                    anchor: Anchor::TopLeft,
-                    ..default()
-                },
+            // Change the sprite
+            Sprite {
+                image: asset_server.load("images/cursor.png"),
+                texture_atlas: Some(TextureAtlas {
+                    layout: atlas_layout.add(TextureAtlasLayout::from_grid(UVec2::splat(80), 3, 1, None, None)),
+                    index: 0,
+                }),
+                color: Color::BEVYPUNK_YELLOW.with_alpha(1.0),
+                anchor: Anchor::TopLeft,
                 ..default()
             },
-
-            // Make the raycaster ignore this entity, we don't want our cursor to block clicking
-            Pickable::IGNORE,
         ));
+
     });
+}
 
-
-    // #======================#
-    // #=== USER INTERFACE ===#
+/// This system spawns the user interface
+fn spawn_ui(mut commands: Commands, assets: Res<AssetServer>){
 
     // Spawn the master ui tree
     commands.spawn((
-        MovableByCamera,
-        UiTreeBundle::<MainUi>::from(UiTree::new("Calculator")),
+        Name::new("Calculator"),
+        // Create the UI Root
+        UiLayoutRoot::new_2d(),
+        // Make the UI synchronized with camera viewport size
+        UiFetchFromCamera::<0>,
     )).with_children(|ui| {
 
-        // Spawn the root div
-        let root = UiLink::<MainUi>::path("Root");
-        ui.spawn((
-            root.clone(),
-            UiLayout::window_full().pack::<Base>(),
-        ));
 
         // Spawn the background
         ui.spawn((
-            root.add("Background"),
-            UiLayout::solid().size((2968.0, 1656.0)).scaling(Scaling::Fill).pack::<Base>(),
-            UiImage2dBundle::from(assets.load(AssetPath::BACKGROUND)),
+            Name::new("Background"),
+            UiLayout::solid().size((2968.0, 1656.0)).scaling(Scaling::Fill).pack(),
+            Sprite::from_image(assets.load("images/background.png")),
         ));
 
         // Spawn the container
-        let container = root.add("Container");
         ui.spawn((
-            container.clone(),
-            UiLayout::solid().size((360.0, 520.0)).scaling(Scaling::Fit).pack::<Base>(),
-        ));
+            Name::new("Container"),
+            UiLayout::solid().size((360.0, 520.0)).scaling(Scaling::Fit).pack(),
+        )).with_children(|ui| {
 
-        // Spawn clear button
-        ui.spawn((
-            container.add("C"),
-            UiLayout::window().pos(get_pos(0, 0)).size(get_size(1, 1)).pack::<Base>(),
-            Button {
-                text: "C".into(),
-                image: assets.load(AssetPath::BUTTON_SYMETRIC),
-                hover_enlarge: true,
-            },
-            ActionButton,
-        ));
-
-        // Spawn text field
-        ui.spawn((
-            container.add("Text"),
-            UiLayout::window().pos(get_pos(1, 0)).size(get_size(3, 1)).pack::<Base>(),
-            Button {
-                text: "".into(),
-                image: assets.load(AssetPath::BUTTON_SYMETRIC),
-                hover_enlarge: false,
-            },
-            DisplayField,
-        ));
-
-        for (i, tx) in ["7", "8", "9", "/", "4", "5", "6", "*", "1", "2", "3", "-", "0", ".", "=", "+"].iter().enumerate() {
+            // Spawn clear button
             ui.spawn((
-                container.add(format!("{i}")),
-                UiLayout::window().pos(get_pos(i % XN as usize, i / XN as usize + 1)).size(get_size(1, 1)).pack::<Base>(),
-                Button {
-                    text: tx.to_string(),
-                    image: assets.load(
-                        match tx {
-                            &"7" => AssetPath::BUTTON_SLICED_TOP_LEFT,
-                            &"8" => AssetPath::BUTTON_SYMETRIC,
-                            &"9" => AssetPath::BUTTON_SYMETRIC,
-                            &"/" => AssetPath::BUTTON_SLICED_TOP_RIGHT,
-                            &"4" => AssetPath::BUTTON_SYMETRIC,
-                            &"5" => AssetPath::BUTTON_SYMETRIC,
-                            &"6" => AssetPath::BUTTON_SYMETRIC,
-                            &"*" => AssetPath::BUTTON_SYMETRIC,
-                            &"1" => AssetPath::BUTTON_SYMETRIC,
-                            &"2" => AssetPath::BUTTON_SYMETRIC,
-                            &"3" => AssetPath::BUTTON_SYMETRIC,
-                            &"-" => AssetPath::BUTTON_SYMETRIC,
-                            &"0" => AssetPath::BUTTON_SLICED_BOTTOM_LEFT,
-                            &"." => AssetPath::BUTTON_SYMETRIC,
-                            &"=" => AssetPath::BUTTON_SYMETRIC,
-                            &"+" => AssetPath::BUTTON_SLICED_BOTTOM_RIGHT,
-                            _ => AssetPath::BUTTON_SYMETRIC
-                        }
-                    ),
-                    hover_enlarge: true,
+                Name::new("C"),
+                UiLayout::window().pos(get_pos(0, 0)).size(get_size(1, 1)).pack(),
+                MyButton {
+                    text: "C".into(),
+                    image: assets.load("images/button_symetric.png"),
                 },
                 ActionButton,
+            )).observe(action_observer);
+
+            // Spawn text field
+            ui.spawn((
+                Name::new("Text"),
+                UiLayout::window().pos(get_pos(1, 0)).size(get_size(3, 1)).pack(),
+                MyButton {
+                    text: "".into(),
+                    image: assets.load("images/button_symetric.png"),
+                },
+                DisplayField,
             ));
-        }
+
+            for (i, text) in ["7", "8", "9", "/", "4", "5", "6", "*", "1", "2", "3", "-", "0", ".", "=", "+"].iter().enumerate() {
+                ui.spawn((
+                    Name::new(format!("{i}")),
+                    UiLayout::window().pos(get_pos(i % XN as usize, i / XN as usize + 1)).size(get_size(1, 1)).pack(),
+                    MyButton {
+                        text: text.to_string(),
+                        image: assets.load(
+                            match *text {
+                                "7" => "images/button_sliced_top_left.png",
+                                "8" => "images/button_symetric.png",
+                                "9" => "images/button_symetric.png",
+                                "/" => "images/button_sliced_top_right.png",
+                                "4" => "images/button_symetric.png",
+                                "5" => "images/button_symetric.png",
+                                "6" => "images/button_symetric.png",
+                                "*" => "images/button_symetric.png",
+                                "1" => "images/button_symetric.png",
+                                "2" => "images/button_symetric.png",
+                                "3" => "images/button_symetric.png",
+                                "-" => "images/button_symetric.png",
+                                "0" => "images/button_sliced_bottom_left.png",
+                                "." => "images/button_symetric.png",
+                                "=" => "images/button_symetric.png",
+                                "+" => "images/button_sliced_bottom_right.png",
+                                _ => "images/button_symetric.png"
+                            }
+                        ),
+                    },
+                    ActionButton,
+                )).observe(action_observer);
+            }
+        });
     });
 }
 
-fn add_controller(
-    gamepad: Res<Gamepads>,
-    mut commands: Commands,
-    query: Query<Entity, With<Cursor2d>>,
-
-) {
-    if gamepad.contains(Gamepad::new(0)) {
-       commands.entity(query.single()).insert(GamepadCursor::new(0));
-    } else {
-        commands.entity(query.single()).remove::<GamepadCursor>();
-    }
-}
 
 // #====================#
 // #=== GRID COMPUTE ===#
@@ -205,7 +166,6 @@ fn add_controller(
 const XN: f32 = 4.0;
 const YN: f32 = 5.0;
 const GAP: f32 = 5.0;
-
 fn get_pos(x: usize, y: usize) -> Rl<Vec2> {
     let xslice = (100.0 - GAP * (XN + 1.0))/XN;
     let yslice = (100.0 - GAP * (YN + 1.0))/YN;
@@ -215,7 +175,6 @@ fn get_pos(x: usize, y: usize) -> Rl<Vec2> {
         y.add(1) as f32 * GAP + y as f32 * yslice
     ))
 }
-
 fn get_size(colspan: usize, rowspan: usize) -> Rl<Vec2> {
     let xslice = (100.0 - GAP * (XN + 1.0))/XN;
     let yslice = (100.0 - GAP * (YN + 1.0))/YN;
@@ -236,70 +195,33 @@ pub struct DisplayField;
 #[derive(Component)]
 pub struct ActionButton;
 
-
-fn update(
-    mut events: EventReader<UiClickEvent>,
-    mut display: Query<&mut Button, (With<DisplayField>, Without<ActionButton>)>,
-    actions: Query<&Button, With<ActionButton>>
+fn action_observer(
+    trigger: Trigger<Pointer<Click>>,
+    actions: Query<&MyButton, With<ActionButton>>,
+    mut display: Single<&mut MyButton, (With<DisplayField>, Without<ActionButton>)>,
 ) {
-    for event in events.read() {
-        if let Ok(btn) = actions.get(event.target) {
-            let Ok(mut display) = display.get_single_mut() else { return; };
-
-            match btn.text.as_str() {
-                "C" => { display.text.clear() },
-                "=" => { 
-                    if let Ok(result) = Context::<f64>::default().evaluate(&display.text) {
-                        display.text = format!("{}", result);
-                    } else {
-                        display.text = format!("Error");
-                    }
-                },
-                _ => {
-                    if display.text.as_str() == "Error" { display.text.clear() }
-                    display.text += &btn.text
+    if let Ok(button) = actions.get(trigger.entity()) {
+        info!("Pressed: {}", button.text);
+        match button.text.as_str() {
+            "C" => { display.text.clear() },
+            "=" => { 
+                if let Ok(result) = Context::<f64>::default().evaluate(&display.text) {
+                    display.text = format!("{}", result);
+                } else {
+                    display.text = String::from("Error");
                 }
-            };
-
-        }
+            },
+            _ => {
+                if display.text.as_str() == "Error" { display.text.clear() }
+                display.text += &button.text
+            }
+        };
     }
 }
 
+
 // #===================#
 // #=== BOILERPLATE ===#
-
-/// All asset paths as constants
-pub struct AssetPath;
-impl AssetPath {
-    // Music
-    pub const SFX_UI: &'static str = "sounds/ui_ping.ogg";
-
-    // Fonts
-    pub const FONT_LIGHT: &'static str = "fonts/rajdhani/Rajdhani-Light.ttf";
-    pub const FONT_REGULAR: &'static str = "fonts/rajdhani/Rajdhani-Regular.ttf";
-    pub const FONT_MEDIUM: &'static str = "fonts/rajdhani/Rajdhani-Medium.ttf";
-    pub const FONT_SEMIBOLD: &'static str = "fonts/rajdhani/Rajdhani-SemiBold.ttf";
-    pub const FONT_BOLD: &'static str = "fonts/rajdhani/Rajdhani-Bold.ttf";
-
-    // Cursor
-    pub const CURSOR: &'static str = "images/cursor.png";
-
-    // Symbols
-    pub const BUTTON_SYMETRIC: &'static str = "images/button_symetric.png";
-    pub const BUTTON_SYMETRIC_SLICED: &'static str = "images/button_symetric_sliced.png";
-    pub const BUTTON_SLICED_BOTTOM_LEFT: &'static str = "images/button_sliced_bottom_left.png";
-    pub const BUTTON_SLICED_BOTTOM_RIGHT: &'static str = "images/button_sliced_bottom_right.png";
-    pub const BUTTON_SLICED_TOP_LEFT: &'static str = "images/button_sliced_top_left.png";
-    pub const BUTTON_SLICED_TOP_RIGHT: &'static str = "images/button_sliced_top_right.png";
-    pub const CHEVRON_LEFT: &'static str = "images/chevron_left.png";
-    pub const CHEVRON_RIGHT: &'static str = "images/chevron_right.png";
-    pub const SWITCH_BASE: &'static str = "images/switch_base.png";
-    pub const SWITCH_HEAD: &'static str = "images/switch_head.png";
-
-    // Miscelanious
-    pub const BACKGROUND: &'static str = "images/background.png";
-    pub const PANEL: &'static str = "images/panel.png";
-}
 
 /// Custom color palette
 pub trait BevypunkColorPalette {
@@ -309,19 +231,19 @@ pub trait BevypunkColorPalette {
     const BEVYPUNK_BLUE: Color;
 }
 impl BevypunkColorPalette for Color {
-    const BEVYPUNK_RED: Color = Color::srgba(255./255., 98./255., 81./255., 1.0);
+    const BEVYPUNK_RED: Color = Color::srgba(1.0, 98./255., 81./255., 1.0);
     const BEVYPUNK_RED_DIM: Color = Color::srgba(172./255., 64./255., 63./255., 1.0);
     const BEVYPUNK_YELLOW: Color = Color::linear_rgba(252./255., 226./255., 8./255., 1.0);
     const BEVYPUNK_BLUE: Color = Color::srgba(8./255., 226./255., 252./255., 1.0);
 }
 
 /// VFX bloom flickering
-fn vfx_bloom_flicker(mut query: Query<&mut BloomSettings>) {
+fn vfx_bloom_flicker(mut query: Query<&mut Bloom>) {
     for mut bloom in &mut query {
         let mut rng = rand::thread_rng();
         if rand::Rng::gen_range(&mut rng, 0..100) < 20 {
             bloom.intensity += (rand::Rng::gen_range(&mut rng, 0.20..0.30)-bloom.intensity)/6.0;
-            bloom.prefilter_settings.threshold += (rand::Rng::gen_range(&mut rng, 0.20..0.30)-bloom.prefilter_settings.threshold)/4.0;
+            bloom.prefilter.threshold += (rand::Rng::gen_range(&mut rng, 0.20..0.30)-bloom.prefilter.threshold)/4.0;
         }
     }
 }
