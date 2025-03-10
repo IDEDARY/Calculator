@@ -89,7 +89,7 @@ impl TextPipe {
 pub struct ButtonPlugin;
 impl Plugin for ButtonPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PostUpdate, TextPipe::system);
+        app.add_systems(Update, TextPipe::system);
         app.add_observer(spawn_observer);
     }
 }

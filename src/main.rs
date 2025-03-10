@@ -1,7 +1,8 @@
 use std::ops::Add;
 
+use bevy::render::settings::WgpuSettings;
+use bevy::render::RenderPlugin;
 pub(crate) use calc::*;
-pub(crate) use bevy::core_pipeline::bloom::Bloom;
 pub(crate) use bevy::prelude::*;
 pub(crate) use bevy_lunex::*;
 pub(crate) use bevy_embedded_assets::*;
@@ -23,8 +24,13 @@ fn main() -> AppExit {
                     }),
                     ..default()
                 })
-                .set(AssetPlugin {
-                    meta_check: bevy::asset::AssetMetaCheck::Never,
+                .set(RenderPlugin {
+                    render_creation: bevy::render::settings::RenderCreation::Automatic(
+                        WgpuSettings {
+                            power_preference: bevy::render::settings::PowerPreference::LowPower,
+                            ..default()
+                        }
+                    ),
                     ..default()
                 }),
             UiLunexPlugins,
@@ -34,7 +40,6 @@ fn main() -> AppExit {
         .add_systems(Startup, spawn_ui)
         .add_plugins(ButtonPlugin)
 
-        .add_systems(Update, vfx_bloom_flicker)
         .run()
 }
 
@@ -44,36 +49,14 @@ fn main() -> AppExit {
 
 
 /// This system spawns & setups the basic camera with cursor
-fn spawn_camera(mut commands: Commands, asset_server: Res<AssetServer>, mut atlas_layout: ResMut<Assets<TextureAtlasLayout>>) {
+fn spawn_camera(mut commands: Commands) {
     // Spawn the camera
     commands.spawn((
-        Camera2d, Camera { hdr: true, clear_color: ClearColorConfig::Custom(Color::srgba(0.0, 0.0, 0.0, 0.0)), ..default() }, Bloom::OLD_SCHOOL, UiSourceCamera::<0>, Transform::from_translation(Vec3::Z * 1000.0),
-    )).with_children(|cam| {
-
-        // Spawn cursor
-        cam.spawn ((
-            SoftwareCursor::new()
-                .set_index(bevy::window::SystemCursorIcon::Default, 0, (14.0, 14.0))
-                .set_index(bevy::window::SystemCursorIcon::Pointer, 1, (10.0, 12.0))
-                .set_index(bevy::window::SystemCursorIcon::Grab, 2, (40.0, 40.0)),
-
-            // Change the scale
-            Transform::from_scale(Vec3::new(0.45, 0.45, 1.0)),
-            
-            // Change the sprite
-            Sprite {
-                image: asset_server.load("images/cursor.png"),
-                texture_atlas: Some(TextureAtlas {
-                    layout: atlas_layout.add(TextureAtlasLayout::from_grid(UVec2::splat(80), 3, 1, None, None)),
-                    index: 0,
-                }),
-                color: Color::BEVYPUNK_YELLOW.with_alpha(1.0),
-                anchor: Anchor::TopLeft,
-                ..default()
-            },
-        ));
-
-    });
+        Camera2d,
+        Camera { hdr: true, ..default() },
+        UiSourceCamera::<0>,
+        Transform::from_translation(Vec3::Z * 1000.0),
+    ));
 }
 
 /// This system spawns the user interface
@@ -87,7 +70,6 @@ fn spawn_ui(mut commands: Commands, assets: Res<AssetServer>){
         // Make the UI synchronized with camera viewport size
         UiFetchFromCamera::<0>,
     )).with_children(|ui| {
-
 
         // Spawn the background
         ui.spawn((
@@ -201,12 +183,11 @@ fn action_observer(
     mut display: Single<&mut MyButton, (With<DisplayField>, Without<ActionButton>)>,
 ) {
     if let Ok(button) = actions.get(trigger.entity()) {
-        info!("Pressed: {}", button.text);
         match button.text.as_str() {
             "C" => { display.text.clear() },
             "=" => { 
                 if let Ok(result) = Context::<f64>::default().evaluate(&display.text) {
-                    display.text = format!("{}", result);
+                    display.text = format!("{:.5}", result);
                 } else {
                     display.text = String::from("Error");
                 }
@@ -235,15 +216,4 @@ impl BevypunkColorPalette for Color {
     const BEVYPUNK_RED_DIM: Color = Color::srgba(172./255., 64./255., 63./255., 1.0);
     const BEVYPUNK_YELLOW: Color = Color::linear_rgba(252./255., 226./255., 8./255., 1.0);
     const BEVYPUNK_BLUE: Color = Color::srgba(8./255., 226./255., 252./255., 1.0);
-}
-
-/// VFX bloom flickering
-fn vfx_bloom_flicker(mut query: Query<&mut Bloom>) {
-    for mut bloom in &mut query {
-        let mut rng = rand::thread_rng();
-        if rand::Rng::gen_range(&mut rng, 0..100) < 20 {
-            bloom.intensity += (rand::Rng::gen_range(&mut rng, 0.20..0.30)-bloom.intensity)/6.0;
-            bloom.prefilter.threshold += (rand::Rng::gen_range(&mut rng, 0.20..0.30)-bloom.prefilter.threshold)/4.0;
-        }
-    }
 }
